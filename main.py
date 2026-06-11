@@ -1,14 +1,21 @@
 import sys
 
 from rich.console import Console
+from rich.markdown import Markdown
 from agent.memory import ConversationMemory
-from agent.llm import chat_stream
+from agent.llm import chat_with_tools
 
 console = Console()
 
 
 def run_chat() -> None:
-    memory = ConversationMemory()
+    memory = ConversationMemory(
+        system_prompt=(
+            "你是一个能使用工具的 AI 助手。"
+            "仅在用户明确询问当前时间或日期时调用 get_current_time，其他问题直接回答。"
+            "请用中文回答。"
+        ),
+    )
     console.print("[bold green]Agent Demo 聊天[/]（输入 quit 退出，/clear 清空历史）\n")
 
     while True:
@@ -21,10 +28,9 @@ def run_chat() -> None:
             continue
 
         memory.add_user(user_input)
-        console.print("[bold magenta]AI> [/]", end="")
-        for token in chat_stream(memory):
-            console.print(token, end="")
-        console.print("\n")
+        reply = chat_with_tools(memory)
+        console.print(Markdown(reply))
+        console.print()
 
 
 if __name__ == "__main__":
