@@ -12,8 +12,9 @@ def run_chat() -> None:
     memory = ConversationMemory(
         system_prompt=(
             "你是一个能使用工具的 AI 助手。"
-            "仅在用户明确询问当前时间或日期时调用 get_current_time，其他问题直接回答。"
-            "请用中文回答。"
+            "仅在用户明确询问当前时间或日期时调用 get_current_time；"
+            "仅在用户需要做数学计算时调用 calculate；"
+            "其他问题直接回答。请用中文回答。"
         ),
     )
     console.print("[bold green]Agent Demo 聊天[/]（输入 quit 退出，/clear 清空历史）\n")

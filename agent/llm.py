@@ -5,10 +5,14 @@ from collections.abc import Iterator
 from openai import OpenAI
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
+    ChatCompletionMessageFunctionToolCallParam,
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
     ChatCompletionToolMessageParam,
     ChatCompletionUserMessageParam,
+)
+from openai.types.chat.chat_completion_message_function_tool_call import (
+    ChatCompletionMessageFunctionToolCall,
 )
 from dotenv import load_dotenv
 
@@ -23,6 +27,19 @@ client = OpenAI(
 )
 
 MODEL = os.getenv("OPENAI_MODEL", "deepseek-chat")
+
+
+def _function_tool_call_to_param(
+    tc: ChatCompletionMessageFunctionToolCall,
+) -> ChatCompletionMessageFunctionToolCallParam:
+    return {
+        "id": tc.id,
+        "type": "function",
+        "function": {
+            "name": tc.function.name,
+            "arguments": tc.function.arguments,
+        },
+    }
 
 
 def chat(user_message: str, system_prompt: str = "你是一个有帮助的 AI 助手，请用中文回答。") -> str:
@@ -84,24 +101,20 @@ def chat_with_tools(memory: ConversationMemory, max_rounds: int = 5) -> str:
             memory.add_assistant(reply)
             return reply
 
+        tool_calls: list[ChatCompletionMessageFunctionToolCallParam] = []
+        for tc in msg.tool_calls:
+            if isinstance(tc, ChatCompletionMessageFunctionToolCall):
+                tool_calls.append(_function_tool_call_to_param(tc))
         assistant_msg: ChatCompletionAssistantMessageParam = {
             "role": "assistant",
             "content": msg.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in msg.tool_calls
-            ],
+            "tool_calls": tool_calls,
         }
         memory.messages.append(assistant_msg)
 
         for tc in msg.tool_calls:
+            if not isinstance(tc, ChatCompletionMessageFunctionToolCall):
+                continue
             args = json.loads(tc.function.arguments or "{}")
             result = execute_tool(tc.function.name, args)
             tool_msg: ChatCompletionToolMessageParam = {
