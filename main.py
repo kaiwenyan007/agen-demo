@@ -8,8 +8,11 @@ Agent Demo 主入口 —— 启动交互式聊天，支持 RAG 知识库问答�
 import os
 import sys
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
+
+load_dotenv()  # 必须先加载 .env，再读 USE_LANGCHAIN 等配置
 
 console = Console()
 # USE_LANGCHAIN=1（默认）走 LangChain Agent + RAG；=0 走手写 ReAct Agent（无 RAG）

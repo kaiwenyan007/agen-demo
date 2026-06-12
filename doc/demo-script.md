@@ -5,7 +5,7 @@
 ```powershell
 cd agent-demo
 .\.venv\Scripts\Activate.ps1
-python main.py
+py .\main.py
 ```
 
 等待出现 `知识库就绪` 后开始演示。
