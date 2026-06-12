@@ -1,6 +1,7 @@
 .venv/
 .env
 .chroma/
+models/
 __pycache__/
 *.pyc
 .idea/
