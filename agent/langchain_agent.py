@@ -1,3 +1,10 @@
+"""
+LangChain Agent 模块 —— 把 LLM 和一组工具（Tool）组合成能「思考 + 行动」的助手。
+
+工具列表见 TOOLS；其中 query_knowledge_base 负责 RAG 检索，
+Agent 遇到概念/FAQ 类问题时会自动调用它，而不是直接编造答案。
+"""
+
 import os
 from datetime import datetime
 from pathlib import Path
@@ -52,12 +59,21 @@ def list_files(path: str = ".") -> str:
 
 @tool
 def query_knowledge_base(question: str) -> str:
-    """从项目知识库检索与问题相关的文档片段。用户问项目功能、概念、FAQ、ReAct、RAG 时优先使用。"""
+    """
+    从项目知识库检索与问题相关的文档片段。
+    用户问项目功能、概念、FAQ、ReAct、RAG 时优先使用。
+
+    @tool 装饰器把这个函数注册为 Agent 可调用的工具；
+    函数 docstring 会告诉 LLM「什么时候该用这个工具」。
+    底层调用 agent/rag.py 的 search_knowledge()，在 Chroma 向量库中做语义检索。
+    """
     return search_knowledge(question)
 
 
+# Agent 可用的全部工具；LLM 会根据问题自动选择调用哪一个
 TOOLS = [get_current_time, calculate_tool, read_file, list_files, query_knowledge_base]
 
+# 单例：AgentExecutor 创建开销较大，进程内只建一次
 _executor: AgentExecutor | None = None
 
 

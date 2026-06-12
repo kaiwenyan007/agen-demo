@@ -1,3 +1,10 @@
+"""
+Agent Demo 主入口 —— 启动交互式聊天，支持 RAG 知识库问答。
+
+启动时会预热向量库（首次较慢，之后读 .chroma/ 缓存）。
+聊天中可用 /reindex 重建知识库索引（修改 knowledge/ 文档后使用）。
+"""
+
 import os
 import sys
 
@@ -5,6 +12,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 
 console = Console()
+# USE_LANGCHAIN=1（默认）走 LangChain Agent + RAG；=0 走手写 ReAct Agent（无 RAG）
 USE_LANGCHAIN = os.getenv("USE_LANGCHAIN", "1") == "1"
 
 
@@ -15,6 +23,7 @@ def run_chat() -> None:
         from agent.langchain_agent import run_agent
         from agent.rag import build_vectorstore
 
+        # 预热：首次启动会从 knowledge/ 建索引并写入 .chroma/，后续启动直接加载
         console.print("[dim]正在加载知识库...[/]")
         build_vectorstore()
         console.print("[dim]知识库就绪[/]\n")
@@ -51,6 +60,7 @@ def run_chat() -> None:
             if USE_LANGCHAIN:
                 from agent.rag import build_vectorstore
 
+                # force_rebuild=True：删除 .chroma/ 并重新从 knowledge/ 全量索引
                 build_vectorstore(force_rebuild=True)
                 console.print("[yellow]知识库索引已重建[/]\n")
             else:
