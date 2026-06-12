@@ -1,24 +1,20 @@
 """
-LangChain Agent 模块 —— 把 LLM 和一组工具（Tool）组合成能「思考 + 行动」的助手。
-
-工具列表见 TOOLS；其中 query_knowledge_base 负责 RAG 检索，
-Agent 遇到概念/FAQ 类问题时会自动调用它，而不是直接编造答案。
+LangChain Agent 模块 —— 支持用户级 API 配置与 Token 统计。
 """
 
-import os
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from agent.rag import search_knowledge
+from agent.token_callback import TokenUsage, TokenUsageCallbackHandler
 from agent.tools.calculator_tool import calculate
-
-load_dotenv()
+from db.api_config import UserApiConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,29 +55,18 @@ def list_files(path: str = ".") -> str:
 
 @tool
 def query_knowledge_base(question: str) -> str:
-    """
-    从项目知识库检索与问题相关的文档片段。
-    用户问项目功能、概念、FAQ、ReAct、RAG 时优先使用。
-
-    @tool 装饰器把这个函数注册为 Agent 可调用的工具；
-    函数 docstring 会告诉 LLM「什么时候该用这个工具」。
-    底层调用 agent/rag.py 的 search_knowledge()，在 Chroma 向量库中做语义检索。
-    """
+    """从项目知识库检索与问题相关的文档片段。用户问项目功能、概念、FAQ、ReAct、RAG 时优先使用。"""
     return search_knowledge(question)
 
 
-# Agent 可用的全部工具；LLM 会根据问题自动选择调用哪一个
 TOOLS = [get_current_time, calculate_tool, read_file, list_files, query_knowledge_base]
 
-# 单例：AgentExecutor 创建开销较大，进程内只建一次
-_executor: AgentExecutor | None = None
 
-
-def build_agent_executor(verbose: bool = True) -> AgentExecutor:
+def build_agent_executor(config: UserApiConfig, verbose: bool = False) -> AgentExecutor:
     llm = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "deepseek-chat"),
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL"),
+        model=config.model,
+        api_key=config.api_key,
+        base_url=config.base_url,
         temperature=0,
     )
 
@@ -102,17 +87,17 @@ def build_agent_executor(verbose: bool = True) -> AgentExecutor:
     return AgentExecutor(agent=agent, tools=TOOLS, verbose=verbose, max_iterations=8)
 
 
-def get_executor(verbose: bool = True) -> AgentExecutor:
-    global _executor
-    if _executor is None:
-        _executor = build_agent_executor(verbose=verbose)
-    return _executor
-
-
-def run_agent(user_input: str, chat_history: list | None = None, verbose: bool = True) -> str:
-    executor = get_executor(verbose=verbose)
-    result = executor.invoke({
-        "input": user_input,
-        "chat_history": chat_history or [],
-    })
-    return result["output"]
+def run_agent(
+    user_input: str,
+    config: UserApiConfig,
+    chat_history: list | None = None,
+    verbose: bool = False,
+) -> tuple[str, TokenUsage]:
+    """运行 Agent，返回 (回复文本, token 用量)。"""
+    handler = TokenUsageCallbackHandler()
+    executor = build_agent_executor(config, verbose=verbose)
+    result = executor.invoke(
+        {"input": user_input, "chat_history": chat_history or []},
+        config={"callbacks": [handler]},
+    )
+    return result["output"], handler.usage

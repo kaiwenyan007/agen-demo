@@ -141,7 +141,7 @@ def get_embeddings() -> Embeddings:
 
     # 模式 2：本地 Embedding 模型（适合没有 Embedding API 或想离线运行）
     if os.getenv("USE_LOCAL_EMBEDDING", "0") == "1":
-        from langchain_community.embeddings import HuggingFaceEmbeddings
+        from langchain_huggingface import HuggingFaceEmbeddings
 
         model_path = os.getenv("LOCAL_EMBEDDING_MODEL_PATH", "").strip()
         if not model_path:

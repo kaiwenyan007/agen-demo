@@ -1,6 +1,7 @@
 .venv/
 .env
 .chroma/
+data/
 models/
 models/._____temp/
 __pycache__/

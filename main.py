@@ -1,8 +1,6 @@
 """
-Agent Demo 主入口 —— 启动交互式聊天，支持 RAG 知识库问答。
-
-启动时会预热向量库（首次较慢，之后读 .chroma/ 缓存）。
-聊天中可用 /reindex 重建知识库索引（修改 knowledge/ 文档后使用）。
+Agent Demo CLI 入口（保留命令行模式，使用 .env 全局配置）。
+Web UI 请使用：streamlit run web/app.py
 """
 
 import os
@@ -12,27 +10,35 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
 
-load_dotenv()  # 必须先加载 .env，再读 USE_LANGCHAIN 等配置
+load_dotenv()
 
 console = Console()
-# USE_LANGCHAIN=1（默认）走 LangChain Agent + RAG；=0 走手写 ReAct Agent（无 RAG）
 USE_LANGCHAIN = os.getenv("USE_LANGCHAIN", "1") == "1"
 
 
 def run_chat() -> None:
-    chat_history: list = []
-
     if USE_LANGCHAIN:
         from agent.langchain_agent import run_agent
         from agent.rag import build_vectorstore
+        from db.api_config import UserApiConfig
+        config = UserApiConfig(
+            api_key=os.getenv("OPENAI_API_KEY", ""),
+            base_url=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+            model=os.getenv("OPENAI_MODEL", "deepseek-chat"),
+        )
 
-        # 预热：首次启动会从 knowledge/ 建索引并写入 .chroma/，后续启动直接加载
         console.print("[dim]正在加载知识库...[/]")
         build_vectorstore()
         console.print("[dim]知识库就绪[/]\n")
 
-        mode = "LangChain Agent + RAG"
-        invoke = lambda text: run_agent(text, chat_history=chat_history, verbose=True)
+        chat_history: list = []
+        mode = "LangChain Agent + RAG (CLI)"
+
+        def invoke(text: str) -> str:
+            reply, usage = run_agent(text, config, chat_history=chat_history, verbose=True)
+            chat_history.append(("human", text))
+            chat_history.append(("ai", reply))
+            return reply
 
         def clear_history() -> None:
             chat_history.clear()
@@ -63,11 +69,10 @@ def run_chat() -> None:
             if USE_LANGCHAIN:
                 from agent.rag import build_vectorstore
 
-                # force_rebuild=True：删除 .chroma/ 并重新从 knowledge/ 全量索引
                 build_vectorstore(force_rebuild=True)
                 console.print("[yellow]知识库索引已重建[/]\n")
             else:
-                console.print("[yellow]RAG 仅在 LangChain 模式下可用（USE_LANGCHAIN=1）[/]\n")
+                console.print("[yellow]RAG 仅在 LangChain 模式下可用[/]\n")
             continue
 
         reply = invoke(user_input)

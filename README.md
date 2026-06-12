@@ -4,11 +4,20 @@
 
 ## 快速开始
 
+### Web UI（推荐）
+
 ```powershell
 cd agent-demo
-py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install streamlit
+streamlit run web/app.py
+```
+
+注册 → 登录 → 配置 API → 开始聊天。
+
+### CLI 模式
+
+```powershell
 copy .env.example .env   # 填入 API Key
 python main.py
 ```
@@ -17,9 +26,12 @@ python main.py
 
 | 能力 | 说明 |
 |------|------|
-| 多轮对话 | CLI 交互，支持上下文记忆 |
+| 用户体系 | 注册/登录，数据按用户隔离 |
+| API 配置 | 每人独立 Key / Base URL / Model（下拉动态获取） |
+| 多轮对话 | Web UI + CLI，SQLite 持久化 |
 | 工具调用 | 查时间、四则运算、读文件、列目录 |
 | RAG 问答 | 基于 `knowledge/` 文档的向量检索问答 |
+| Token 统计 | 按用户/模型统计用量与预估成本 |
 | 双模式 | LangChain Agent（默认）/ 手写 ReAct 可切换 |
 
 ## CLI 命令
@@ -81,6 +93,11 @@ agent-demo/
 ## 团队 Demo
 
 5 分钟演示脚本见 [doc/demo-script.md](doc/demo-script.md)。
+
+## 扩展文档
+
+- [扩展 v1：用户体系 + Web UI](doc/extensions-v1.md)
+- [多 Agent 协作路线提示](doc/extensions-v1.md#下一步多-agent-协作提示)
 
 ## 学习文档
 
