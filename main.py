@@ -1,35 +1,63 @@
+import os
 import sys
 
 from rich.console import Console
 from rich.markdown import Markdown
-from agent.memory import ConversationMemory
-from agent.llm import chat_with_tools
 
 console = Console()
+USE_LANGCHAIN = os.getenv("USE_LANGCHAIN", "1") == "1"
 
 
 def run_chat() -> None:
-    memory = ConversationMemory(
-        system_prompt=(
-            "你是一个能使用工具的 AI 助手。"
-            "仅在用户明确询问当前时间或日期时调用 get_current_time；"
-            "仅在用户需要做数学计算时调用 calculate；"
-            "其他问题直接回答。请用中文回答。"
-        ),
+    chat_history: list = []
+
+    if USE_LANGCHAIN:
+        from agent.langchain_agent import run_agent
+        from agent.rag import build_vectorstore
+
+        console.print("[dim]正在加载知识库...[/]")
+        build_vectorstore()
+        console.print("[dim]知识库就绪[/]\n")
+
+        mode = "LangChain Agent + RAG"
+        invoke = lambda text: run_agent(text, chat_history=chat_history, verbose=True)
+    else:
+        from agent.react_agent import ReactAgent
+
+        react_agent = ReactAgent()
+        mode = "手写 ReAct Agent"
+        invoke = lambda text: react_agent.run(text, verbose=True)
+
+        def clear_history() -> None:
+            react_agent.memory.clear()
+
+    console.print(
+        f"[bold green]Agent Demo 聊天[/] [dim]({mode})[/]\n"
+        "quit 退出 | /clear 清空历史 | /reindex 重建知识库索引\n"
     )
-    console.print("[bold green]Agent Demo 聊天[/]（输入 quit 退出，/clear 清空历史）\n")
 
     while True:
         user_input = console.input("[bold cyan]你> [/]")
         if user_input.strip().lower() in ("quit", "exit", "q"):
             break
         if user_input.strip() == "/clear":
-            memory.clear()
+            if USE_LANGCHAIN:
+                chat_history.clear()
+            else:
+                clear_history()
             console.print("[yellow]对话历史已清空[/]\n")
             continue
+        if user_input.strip() == "/reindex":
+            if USE_LANGCHAIN:
+                from agent.rag import build_vectorstore
 
-        memory.add_user(user_input)
-        reply = chat_with_tools(memory)
+                build_vectorstore(force_rebuild=True)
+                console.print("[yellow]知识库索引已重建[/]\n")
+            else:
+                console.print("[yellow]RAG 仅在 LangChain 模式下可用（USE_LANGCHAIN=1）[/]\n")
+            continue
+
+        reply = invoke(user_input)
         console.print(Markdown(reply))
         console.print()
 
