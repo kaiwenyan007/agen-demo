@@ -44,6 +44,16 @@ _vectorstore: Chroma | None = None             # Chroma 向量库实例
 _keyword_chunks: list[Document] | None = None   # 文档切块缓存（关键词回退模式用）
 _use_keyword_fallback = False                    # 是否已切换到关键词检索（无 Embedding API 时）
 
+# 降级回退时捕获的可预期异常（网络、依赖缺失、索引损坏等），避免裸 except Exception
+_RECOVERABLE_ERRORS = (
+    ImportError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    ConnectionError,
+    TimeoutError,
+)
+
 
 class _KeywordEmbeddings(Embeddings):
     """
@@ -144,8 +154,8 @@ def get_embeddings() -> Embeddings:
                     model_name,
                     cache_dir=str(PROJECT_ROOT / "models"),
                 )
-            except Exception:
-                # ModelScope 失败则走 HuggingFace 镜像
+            except _RECOVERABLE_ERRORS:
+                # ModelScope 未安装或下载失败时，走 HuggingFace 镜像
                 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
                 model_path = model_name
 
@@ -160,7 +170,7 @@ def get_embeddings() -> Embeddings:
             model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
         )
         return _embeddings
-    except Exception:
+    except _RECOVERABLE_ERRORS:
         # 模式 4：API 不可用时自动降级
         _use_keyword_fallback = True
         _embeddings = _KeywordEmbeddings()
@@ -222,7 +232,7 @@ def build_vectorstore(force_rebuild: bool = False) -> Chroma:
             # count() > 0 确保不是空目录被误判为「已有索引」
             if _vectorstore._collection.count() > 0:
                 return _vectorstore
-        except Exception:
+        except _RECOVERABLE_ERRORS:
             # 索引文件损坏时，删掉重建
             if CHROMA_DIR.exists():
                 shutil.rmtree(CHROMA_DIR)
@@ -281,7 +291,7 @@ def search_knowledge(query: str, k: int = 3) -> str:
             vs = build_vectorstore()
             # 把问题向量化，在 Chroma 中找余弦距离最近的 k 个片段
             results = vs.similarity_search(query, k=k)
-        except Exception:
+        except _RECOVERABLE_ERRORS:
             # 向量检索失败（如 API 超时），降级到关键词匹配
             results = _keyword_search(query, k=k)
 

@@ -2,6 +2,7 @@
 .env
 .chroma/
 models/
+models/._____temp/
 __pycache__/
 *.pyc
 .idea/

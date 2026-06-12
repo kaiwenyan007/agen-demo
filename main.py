@@ -30,6 +30,9 @@ def run_chat() -> None:
 
         mode = "LangChain Agent + RAG"
         invoke = lambda text: run_agent(text, chat_history=chat_history, verbose=True)
+
+        def clear_history() -> None:
+            chat_history.clear()
     else:
         from agent.react_agent import ReactAgent
 
@@ -50,10 +53,7 @@ def run_chat() -> None:
         if user_input.strip().lower() in ("quit", "exit", "q"):
             break
         if user_input.strip() == "/clear":
-            if USE_LANGCHAIN:
-                chat_history.clear()
-            else:
-                clear_history()
+            clear_history()
             console.print("[yellow]对话历史已清空[/]\n")
             continue
         if user_input.strip() == "/reindex":
