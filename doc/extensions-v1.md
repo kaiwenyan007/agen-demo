@@ -30,6 +30,8 @@ streamlit run web/app.py
 - 路径：`data/app.db`（自动创建，已加入 `.gitignore`）
 - 表：`users`、`user_api_configs`、`conversations`、`messages`、`token_usage`
 
+v2 新增表见 [extensions-v2.md](extensions-v2.md)：`user_knowledge_configs`、`rag_queries`、`chroma_cache_events`。
+
 ## 使用流程
 
 1. 注册账号 → 登录
@@ -98,3 +100,9 @@ CLI 模式继续使用 `.env` 全局配置，不依赖用户登录。
 4. 在 Streamlit 中展示每个 Agent 的中间输出（可观测性）
 
 准备好了可以说 **「开始多 Agent 扩展」**，我会带你逐步实现。
+
+---
+
+## 后续扩展（v2，已实现）
+
+详见 **[extensions-v2.md](extensions-v2.md)**：Web 流式聊天、本机个人 md 知识库、天气工具、RAG/Token 统计、登录记住、启动预热等。

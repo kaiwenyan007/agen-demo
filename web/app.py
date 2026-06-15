@@ -66,6 +66,7 @@ def logout() -> None:
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     _init_session()
+    # 下次登录页重新从本机记住文件预填
 
 
 def _enter_app(user_id: int) -> None:
@@ -100,13 +101,41 @@ def render_auth() -> None:
     st.markdown("---")
 
     if st.session_state.auth_mode == "login":
-        username = st.text_input("USERNAME", key="login_user", placeholder="root@local")
-        password = st.text_input("PASSWORD", type="password", key="login_pass")
+        from web.auth_remember import clear_remembered, load_remembered, save_remembered
+
+        if not st.session_state.get("_login_prefilled"):
+            saved = load_remembered()
+            if saved:
+                st.session_state.login_user = saved["username"]
+                st.session_state.login_pass = saved["password"]
+                st.session_state.remember_login = True
+            st.session_state._login_prefilled = True
+
+        username = st.text_input(
+            "USERNAME",
+            key="login_user",
+            placeholder="root@local",
+            autocomplete="username",
+        )
+        password = st.text_input(
+            "PASSWORD",
+            type="password",
+            key="login_pass",
+            autocomplete="current-password",
+        )
+        remember = st.checkbox(
+            "记住账号密码（仅本机 data 目录，公共电脑请勿勾选）",
+            key="remember_login",
+        )
         if st.button(">> AUTHENTICATE", use_container_width=True, type="primary", key="login_btn"):
             from db.auth import login_user
 
             user_id, msg = login_user(username, password)
             if user_id:
+                if remember:
+                    save_remembered(username, password)
+                else:
+                    clear_remembered()
                 _enter_app(user_id)
             else:
                 st.error(f"[DENIED] {msg}")

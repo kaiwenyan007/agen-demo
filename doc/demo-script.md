@@ -1,108 +1,109 @@
 # 团队 Demo 演示脚本（约 5 分钟）
 
-## 启动
+## 启动（Web 推荐）
 
 ```powershell
 cd agent-demo
-.\.venv\Scripts\Activate.ps1
-py .\main.py
+pip install -r requirements.txt
+py -m streamlit run web/app.py
 ```
 
-等待出现 `知识库就绪` 后开始演示。
+浏览器 `http://localhost:8501` → 注册/登录 → **API CONFIG** 填 Key → **CHAT**。
+
+CLI 备选：`py main.py`（见文末）。
 
 ---
 
 ## 1. 开场（30 秒）
 
-> 「这是我们一周从零搭建的 Python AI Agent Demo。它能聊天、自主调用工具、还能查项目知识库回答问题。」
+> 「这是 Python AI Agent Demo：多轮对话、自主调工具、RAG 查知识库，还有 Web 用户体系和个人 md 知识库。」
 
-可简要展示项目结构：`agent/`、`knowledge/`、`doc/iterations/`。
+可展示：侧边栏 CHAT / API CONFIG / KNOWLEDGE / TOKEN STATS。
 
 ---
 
 ## 2. 基础对话（30 秒）
 
 ```
-你> 你好，请用三句话介绍一下你自己
+今天星期几？现在几点？
 ```
 
-展示：流畅中文回复、多轮对话能力。
+展示：调用时间工具，星期正确。
 
 ---
 
 ## 3. 工具调用（1 分钟）
 
 ```
-你> 现在几点了？
+上海今天天气怎么样？
 ```
 
-展示：终端 `verbose` 日志中调用 `get_current_time`。
+展示：调用天气工具，返回气温与天气。
 
 ```
-你> 123 乘以 456 等于多少？
+123 乘以 456 等于多少？
 ```
 
-展示：调用 `calculate_tool`。
-
-```
-你> knowledge 目录下有哪些文件？
-```
-
-展示：调用 `list_files`。
+展示：计算器工具 + 聊天状态「正在调用：计算器」。
 
 ---
 
-## 4. RAG 知识库问答（1.5 分钟）
+## 4. RAG 知识库（1.5 分钟）
 
 ```
-你> 什么是 ReAct？
+什么是 ReAct？
 ```
 
-展示：调用 `query_knowledge_base`，基于 `knowledge/agent-faq.md` 回答。
+展示：`query_knowledge_base` 检索 `knowledge/agent-faq.md`。
 
 ```
-你> RAG 和直接读文件有什么区别？
+这个项目有哪些功能？
 ```
 
-展示：检索增强 vs 全文件读取的差异。
+展示：FAQ / project-intro 跨文档检索。
 
-```
-你> 这个项目有哪些功能？
-```
+**（可选）个人知识库：**
 
-展示：跨文档知识检索。
+1. 打开 **KNOWLEDGE**，选择本机 md 文件夹 → **REBUILD INDEX**
+2. 提问与个人笔记相关的问题
 
 ---
 
-## 5. 多步推理（1 分钟）
+## 5. 工程化亮点（1 分钟）
 
-```
-你> 读一下 knowledge/project-intro.md，用三句话总结
-```
-
-展示：Agent 自主决定先 `read_file` 再总结。
+- **TOKEN STATS**：Token 用量、RAG 命中率、Chroma 缓存
+- **记住登录**：勾选后下次自动填账号
+- 终端启动日志：`agent_demo.startup` 预热完成
 
 ---
 
 ## 6. 收尾（30 秒）
 
-可补充说明：
-
-- **7 天迭代路线**：对话 → 工具 → ReAct → LangChain → RAG
-- **双模式切换**：`USE_LANGCHAIN=0` 可对比手写 ReAct
-- **后续扩展**：Web UI（Streamlit）、MCP 工具、多 Agent 协作
-
-```
-你> quit
-```
+- 7 天迭代 + 扩展 v1/v2 文档
+- 后续：多 Agent、增量索引、服务器部署
 
 ---
 
-## 备用问题（防冷场）
+## CLI 演示补充
 
-| 问题 | 预期行为 |
-|------|----------|
-| 今天星期几？ | 调时间工具 |
-| 100 除以 4 等于多少？ | 调计算工具 |
-| /reindex | 重建知识库，无报错 |
-| /clear | 清空对话历史 |
+```powershell
+py main.py
+```
+
+| 输入 | 预期 |
+|------|------|
+| 现在几点？ | 时间工具 |
+| 北京天气 | 天气工具 |
+| 什么是 RAG？ | 知识库检索 |
+| `/reindex` | 重建索引 |
+| `/clear` | 清空历史 |
+
+---
+
+## 备用问题
+
+| 问题 | 预期 |
+|------|------|
+| 100 除以 4 | 计算 |
+| knowledge 有哪些文件 | list_files |
+| 今天天气（不说城市） | 追问城市名 |

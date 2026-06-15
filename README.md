@@ -1,6 +1,6 @@
 # Agent Demo
 
-一周学习的 Python AI Agent 演示项目，具备**多轮对话、工具调用、RAG 知识库问答**能力。
+Python AI Agent 演示项目：**多轮对话、工具调用、RAG 知识库、Streamlit Web UI**，支持本机个人 md 知识库与按用户隔离。
 
 ## 快速开始
 
@@ -12,104 +12,92 @@ pip install -r requirements.txt
 py -m streamlit run web/app.py
 ```
 
-> Windows 若提示找不到 `streamlit` 命令，请用 `py -m streamlit run ...`（不依赖 Scripts 目录是否在 PATH 里）。
+或使用 `run_web.ps1`。浏览器打开 `http://localhost:8501`。
 
-注册 → 登录 → 配置 API → 开始聊天。
+流程：**注册 → 登录 → API CONFIG →（可选）KNOWLEDGE 配置本机 md → CHAT**。
 
 ### CLI 模式
 
 ```powershell
-copy .env.example .env   # 填入 API Key
-python main.py
+copy .env.example .env
+py main.py
 ```
 
 ## 功能一览
 
+### 对话与 Agent
+
 | 能力 | 说明 |
 |------|------|
-| 用户体系 | 注册/登录，数据按用户隔离 |
-| API 配置 | 每人独立 Key / Base URL / Model（下拉动态获取） |
-| 多轮对话 | Web UI + CLI，SQLite 持久化 |
-| 工具调用 | 查时间、四则运算、读文件、列目录 |
-| RAG 问答 | 基于 `knowledge/` 文档的向量检索问答 |
-| Token 统计 | 按用户/模型统计用量与预估成本 |
-| 双模式 | LangChain Agent（默认）/ 手写 ReAct 可切换 |
+| 多轮对话 | Web + CLI，SQLite 持久化，多会话 |
+| 双模式 | LangChain（默认）/ ReAct（`USE_LANGCHAIN=0`） |
+| 流式回复 | Web 逐字输出 +「正在调用：xxx」状态 |
+| 启动预热 | 后台加载 Agent/Embedding，终端结构化日志 |
 
-## CLI 命令
+### 工具
+
+| 工具 | 说明 |
+|------|------|
+| 时间 | 含中文星期 |
+| 计算 | 四则运算 |
+| 文件 | 读/列项目内文件 |
+| 知识库 | RAG（公共 + 个人 md） |
+| 天气 | 中国城市今日天气（Open-Meteo） |
+
+### RAG 与知识库
+
+| 能力 | 说明 |
+|------|------|
+| 公共库 | `knowledge/` |
+| 个人库 | KNOWLEDGE 页配置本机路径（含文件夹选择器） |
+| 用户隔离 | `.chroma/users/{user_id}/` |
+| 索引 | 扫描 md、重建索引 |
+
+### Web 用户体系
+
+| 能力 | 说明 |
+|------|------|
+| 注册登录 | bcrypt，按用户隔离 |
+| 记住登录 | 本机文件 + 浏览器密码管理器 |
+| API 配置 | 每人 Key / URL / Model |
+| 统计 | Token、RAG 命中率、Chroma 缓存 |
+| 界面 | 暗色黑客风，响应式 |
+
+### CLI 命令
 
 | 输入 | 说明 |
 |------|------|
-| `quit` / `exit` / `q` | 退出 |
-| `/clear` | 清空对话历史 |
-| `/reindex` | 重建知识库向量索引（修改 `knowledge/` 后使用） |
+| `quit` / `q` | 退出 |
+| `/clear` | 清空历史 |
+| `/reindex` | 重建公共知识库索引 |
 
 ## 环境变量
 
-复制 `.env.example` 为 `.env`，主要配置：
-
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `OPENAI_API_KEY` | 大模型 API Key | `sk-...` |
-| `OPENAI_BASE_URL` | API 地址 | `https://api.deepseek.com` |
-| `OPENAI_MODEL` | 对话模型 | `deepseek-chat` |
-| `USE_LANGCHAIN` | `1` LangChain / `0` 手写 ReAct | `1` |
-| `USE_LOCAL_EMBEDDING` | 使用本地 Embedding 模型 | `1` |
-| `USE_KEYWORD_FALLBACK` | 离线关键词检索（无向量时用） | `0` |
-| `LOCAL_EMBEDDING_MODEL_PATH` | 已下载模型本地路径 | `models/BAAI/bge-small-zh-v1___5` |
-
-## 示例对话
-
-```
-你> 现在几点了？
-AI> 现在是 2026 年 6 月 12 日 ...
-
-你> 123 乘以 456 等于多少？
-AI> 56,088
-
-你> 什么是 ReAct？
-AI> （从知识库检索后回答）
-
-你> knowledge 目录有哪些文件？
-AI> project-intro.md, agent-faq.md
-```
+见 `.env.example`：`OPENAI_API_KEY`、`USE_LANGCHAIN`、`USE_LOCAL_EMBEDDING` 等。Web 模式 API 以用户 **API CONFIG** 为准。
 
 ## 项目结构
 
 ```
 agent-demo/
-├── main.py                 # CLI 入口
-├── agent/
-│   ├── llm.py              # LLM 客户端
-│   ├── memory.py           # 对话记忆
-│   ├── react_agent.py      # 手写 ReAct Agent
-│   ├── langchain_agent.py  # LangChain Agent
-│   ├── rag.py              # RAG 向量库
-│   └── tools/              # 工具定义
-├── knowledge/              # RAG 知识库文档
-├── doc/                    # 学习文档（7 天迭代笔记）
-├── .chroma/                # 向量库缓存（自动生成）
-└── models/                 # 本地 Embedding 模型（自动生成）
+├── main.py
+├── web/                    # Streamlit UI
+├── agent/                  # Agent、RAG、工具、启动预热
+├── db/                     # SQLite
+├── knowledge/              # 公共 md 知识库
+├── data/                   # app.db（gitignore）
+├── .chroma/                # 向量索引（gitignore）
+└── doc/                    # 文档
 ```
 
-## 团队 Demo
+## 文档
 
-5 分钟演示脚本见 [doc/demo-script.md](doc/demo-script.md)。
-
-## 扩展文档
-
-- [扩展 v1：用户体系 + Web UI](doc/extensions-v1.md)
-- [多 Agent 协作路线提示](doc/extensions-v1.md#下一步多-agent-协作提示)
-
-## 学习文档
-
-- [一周学习路线图](doc/learning-roadmap.md)
-- [版本迭代笔记](doc/iterations/README.md)
-- [AI Agent 学习指南](doc/ai-agent-learning-guide.md)
+| 文档 | 内容 |
+|------|------|
+| [extensions-v1.md](doc/extensions-v1.md) | 用户体系 + Web 初版 |
+| [extensions-v2.md](doc/extensions-v2.md) | 个人知识库、天气、流式、统计 |
+| [demo-script.md](doc/demo-script.md) | 演示脚本 |
+| [learning-roadmap.md](doc/learning-roadmap.md) | 学习路线 |
 
 ## 技术栈
 
-- Python 3.13
-- OpenAI 兼容 API（DeepSeek 等）
-- LangChain + LangGraph 生态
-- Chroma 向量库
-- ModelScope 本地 Embedding（`bge-small-zh-v1.5`）
+Python 3.13 · Streamlit · LangChain · Chroma · SQLite · Open-Meteo · 本地 Embedding（bge-small-zh）

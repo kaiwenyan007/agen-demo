@@ -11,5 +11,7 @@
 | v0.5 | [v0.5-day5-langchain-agent.md](./v0.5-day5-langchain-agent.md) | 已完成 |
 | v0.6 | [v0.6-day6-simple-rag.md](./v0.6-day6-simple-rag.md) | 已完成 |
 | v0.7 | [v0.7-day7-polish-and-demo.md](./v0.7-day7-polish-and-demo.md) | 已完成 |
+| 扩展 v1 | [../extensions-v1.md](../extensions-v1.md) | 已完成 |
+| 扩展 v2 | [../extensions-v2.md](../extensions-v2.md) | 已完成 |
 
 **总路线图**：[../learning-roadmap.md](../learning-roadmap.md)

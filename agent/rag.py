@@ -56,6 +56,11 @@ def _chroma_dir_for_scope(user_id: int | None) -> Path:
     return user_chroma_dir(user_id) if user_id is not None else CHROMA_DIR
 
 
+def _vectorstore_chunk_count(vs: Chroma) -> int:
+    """返回向量库中的 chunk 数量（使用 Chroma 公开 API，避免访问 _collection）。"""
+    return len(vs.get(include=[])["ids"])
+
+
 def get_knowledge_dirs(user_id: int | None = None) -> list[Path]:
     """解析当前 scope 应索引的 md 目录列表。"""
     dirs: list[Path] = []
@@ -234,7 +239,7 @@ def build_vectorstore(user_id: int | None = None, force_rebuild: bool = False) -
                 persist_directory=str(chroma_path),
                 embedding_function=_LazyEmbeddings(),
             )
-            if vs._collection.count() > 0:
+            if _vectorstore_chunk_count(vs) > 0:
                 _vectorstores[key] = vs
                 record_chroma_event("disk_hit")
                 return vs
@@ -260,7 +265,7 @@ def build_vectorstore(user_id: int | None = None, force_rebuild: bool = False) -
         from db.user_knowledge import count_md_files, update_index_stats
 
         doc_count = count_md_files(*dirs)
-        update_index_stats(user_id, doc_count, vs._collection.count())
+        update_index_stats(user_id, doc_count, _vectorstore_chunk_count(vs))
 
     return vs
 
@@ -325,7 +330,7 @@ def get_knowledge_base_info(user_id: int | None = None) -> dict:
     chroma_path = _chroma_dir_for_scope(user_id)
     try:
         vs = build_vectorstore(user_id=user_id)
-        chunk_count = vs._collection.count()
+        chunk_count = _vectorstore_chunk_count(vs)
     except _RECOVERABLE_ERRORS:
         pass
     return {

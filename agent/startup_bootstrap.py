@@ -110,7 +110,7 @@ def run_startup_bootstrap(
     preload_embeddings: bool = True,
     preload_chroma: bool = True,
     on_phase: Callable[[str], None] | None = None,
-) -> BootstrapResult:
+) -> BootstrapResult | None:
     """同步执行启动预热；供 CLI 或后台线程调用。"""
     configure_startup_logging()
     if _bootstrap_done.is_set():
@@ -189,6 +189,7 @@ def run_startup_bootstrap(
             return BootstrapResult(ok=False, elapsed_s=elapsed, steps=steps, error=str(exc))
         finally:
             _bootstrap_done.set()
+            return None
 
 
 def schedule_startup_bootstrap(**kwargs) -> None:

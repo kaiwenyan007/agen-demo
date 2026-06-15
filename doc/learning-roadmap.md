@@ -118,3 +118,16 @@ agent-demo/
 
 从 **[Day 1 / v0.1](./iterations/v0.1-day1-setup-and-first-chat.md)** 开始。  
 在对话里对我说：**「开始 Day 1」**，我会带你逐步执行。
+
+---
+
+## 扩展阶段（7 天之后，已完成）
+
+一周 CLI 路线完成后，项目继续扩展为**本机 Web 应用**：
+
+| 阶段 | 文档 | 主要内容 |
+|------|------|----------|
+| 扩展 v1 | [extensions-v1.md](./extensions-v1.md) | 用户注册登录、SQLite 持久化、Streamlit Web UI、每人独立 API 配置 |
+| 扩展 v2 | [extensions-v2.md](./extensions-v2.md) | 流式聊天、个人 md 知识库、天气工具、RAG/Token 统计、登录记住、启动预热 |
+
+当前功能总览见项目根目录 [README.md](../README.md)，演示话术见 [demo-script.md](./demo-script.md)。
