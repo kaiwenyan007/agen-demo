@@ -49,7 +49,7 @@ def read_file(path: str) -> str:
 
 @tool
 def list_files(path: str = ".") -> str:
-    """列出目录下的文件名。path 为相对路径，如 knowledge。"""
+    """列出项目内目录下的文件名。path 为相对项目根的路径，如 knowledge。不能用于用户本机个人知识库路径。"""
     target = (PROJECT_ROOT / path).resolve()
     if not str(target).startswith(str(PROJECT_ROOT)):
         return "错误：不允许访问项目外路径"
@@ -59,8 +59,19 @@ def list_files(path: str = ".") -> str:
 
 
 @tool
+def list_knowledge_files() -> str:
+    """列出当前用户在 KNOWLEDGE 页配置的知识库目录中的文档。用户问知识库有哪些文件时必须调用。"""
+    from agent.rag import describe_knowledge_files
+    from agent.rag_context import get_rag_context
+
+    ctx = get_rag_context()
+    user_id = ctx.user_id if ctx else None
+    return describe_knowledge_files(user_id)
+
+
+@tool
 def query_knowledge_base(question: str) -> str:
-    """从知识库检索文档片段（含用户配置的本机 md 目录与项目 knowledge/）。问笔记、文档、FAQ 时优先使用。"""
+    """从用户配置的知识库检索文档片段。问笔记、文档内容时优先使用。"""
     return search_knowledge(question)
 
 
@@ -75,6 +86,7 @@ TOOLS = [
     calculate_tool,
     read_file,
     list_files,
+    list_knowledge_files,
     query_knowledge_base,
     get_today_weather,
 ]
@@ -94,7 +106,8 @@ def build_agent_executor(config: UserApiConfig, verbose: bool = False) -> AgentE
             "需要查时间、做计算、读文件、列目录时请调用相应工具。"
             "回答日期、星期几时，必须原样使用 get_current_time 工具返回的星期，禁止自行推算。"
             "用户问天气时，必须调用 get_today_weather 并传入中国城市名；若用户未说明城市，请先追问要查哪座城市，禁止编造天气。"
-            "回答项目概念、FAQ、功能介绍时，优先调用 query_knowledge_base 检索知识库，不要编造结果。"
+            "用户问个人知识库、笔记目录有哪些文件时，必须调用 list_knowledge_files，禁止用 list_files(path='knowledge') 代替。"
+            "回答文档内容检索时，优先调用 query_knowledge_base 检索用户配置的知识库，不要编造结果。"
             "请用中文回答。",
         ),
         MessagesPlaceholder("chat_history", optional=True),

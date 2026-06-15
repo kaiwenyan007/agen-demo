@@ -20,6 +20,8 @@ _bootstrap_lock = threading.Lock()
 _bootstrap_scheduled = False
 _bootstrap_done = threading.Event()
 _bootstrap_phase = "等待启动预热…"
+_bootstrap_steps_done: list[tuple[str, float]] = []
+_bootstrap_started_at: float | None = None
 _logging_configured = False
 
 
@@ -99,6 +101,7 @@ def _step(name: str, fn: Callable[[], None], steps: list[tuple[str, float]]) -> 
     fn()
     elapsed = time.perf_counter() - t0
     steps.append((name, elapsed))
+    _bootstrap_steps_done.append((name, elapsed))
     logger.info("[warmup] %s 完成 (%.2fs)", name, elapsed)
 
 
@@ -121,8 +124,13 @@ def run_startup_bootstrap(
         if _bootstrap_done.is_set():
             return BootstrapResult(ok=True, elapsed_s=0.0)
 
+        global _bootstrap_steps_done, _bootstrap_started_at
+        _bootstrap_steps_done = []
+        _bootstrap_started_at = time.perf_counter()
+
         steps: list[tuple[str, float]] = []
         t_all = time.perf_counter()
+        result: BootstrapResult
 
         def phase(msg: str) -> None:
             _set_phase(msg)
@@ -147,19 +155,17 @@ def run_startup_bootstrap(
 
             if preload_chroma:
                 def _chroma() -> None:
-                    from agent.rag import CHROMA_DIR, KNOWLEDGE_DIR, get_knowledge_base_info
+                    from agent.rag import CHROMA_DIR, get_knowledge_base_info
 
-                    md_count = len(list(KNOWLEDGE_DIR.glob("**/*.md"))) if KNOWLEDGE_DIR.exists() else 0
-                    logger.info("[rag] knowledge/ 文档数: %d", md_count)
-                    info = get_knowledge_base_info()
+                    info = get_knowledge_base_info(load_vectorstore=False)
                     logger.info(
-                        "[rag] Chroma 索引: chunks=%d ready=%s dir=%s",
+                        "[rag] 向量库元数据: chunks=%d ready=%s dir=%s（仅用户配置知识库，首次 RAG/重建时加载）",
                         info["chunk_count"],
                         info["chroma_ready"],
                         CHROMA_DIR,
                     )
 
-                _step("加载 Chroma 向量索引", _chroma, steps)
+                _step("检查向量库配置", _chroma, steps)
 
             if preload_agent:
                 def _agent() -> None:
@@ -182,17 +188,24 @@ def run_startup_bootstrap(
             _set_phase("引擎就绪")
             logger.info("[warmup] 全部完成，总耗时 %.2fs", elapsed)
             logger.info("==========================================")
-            return BootstrapResult(ok=True, elapsed_s=elapsed, steps=steps)
+            result = BootstrapResult(ok=True, elapsed_s=elapsed, steps=steps)
         except Exception as exc:
             elapsed = time.perf_counter() - t_all
             logger.exception("[warmup] 预热失败 (%.2fs): %s", elapsed, exc)
-            return BootstrapResult(ok=False, elapsed_s=elapsed, steps=steps, error=str(exc))
+            result = BootstrapResult(ok=False, elapsed_s=elapsed, steps=steps, error=str(exc))
         finally:
             _bootstrap_done.set()
-            return None
+        return result
 
 
-def schedule_startup_bootstrap(**kwargs) -> None:
+def schedule_startup_bootstrap(
+    *,
+    init_database: bool = True,
+    log_config: bool = True,
+    preload_agent: bool = True,
+    preload_embeddings: bool = True,
+    preload_chroma: bool = True,
+) -> None:
     """后台线程触发预热（每个进程仅调度一次）。"""
     global _bootstrap_scheduled
     configure_startup_logging()
@@ -204,9 +217,34 @@ def schedule_startup_bootstrap(**kwargs) -> None:
     logger.info("[warmup] 已调度后台预热线程")
 
     def _worker() -> None:
-        run_startup_bootstrap(**kwargs)
+        run_startup_bootstrap(
+            init_database=init_database,
+            log_config=log_config,
+            preload_agent=preload_agent,
+            preload_embeddings=preload_embeddings,
+            preload_chroma=preload_chroma,
+        )
 
     threading.Thread(target=_worker, name="agent-demo-bootstrap", daemon=True).start()
+
+
+def ensure_full_bootstrap_scheduled() -> None:
+    """登录后调度全量预热（未调度时触发）。"""
+    schedule_startup_bootstrap()
+
+
+def get_bootstrap_progress() -> dict:
+    """供 Web 启动画面轮询的预热进度。"""
+    elapsed = 0.0
+    if _bootstrap_started_at is not None:
+        elapsed = time.perf_counter() - _bootstrap_started_at
+    return {
+        "ready": _bootstrap_done.is_set(),
+        "scheduled": _bootstrap_scheduled,
+        "phase": current_bootstrap_phase(),
+        "steps": list(_bootstrap_steps_done),
+        "elapsed_s": elapsed,
+    }
 
 
 def is_bootstrap_ready() -> bool:

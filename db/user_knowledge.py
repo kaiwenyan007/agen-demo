@@ -54,7 +54,6 @@ def get_user_knowledge_config(user_id: int) -> UserKnowledgeConfig:
 def save_user_knowledge_config(
     user_id: int,
     knowledge_dir: str,
-    include_project: bool,
 ) -> tuple[bool, str]:
     path = knowledge_dir.strip()
     if path:
@@ -65,13 +64,13 @@ def save_user_knowledge_config(
         conn.execute(
             """
             INSERT INTO user_knowledge_configs (user_id, knowledge_dir, include_project, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
+            VALUES (?, ?, 0, datetime('now'))
             ON CONFLICT(user_id) DO UPDATE SET
                 knowledge_dir = excluded.knowledge_dir,
-                include_project = excluded.include_project,
+                include_project = 0,
                 updated_at = datetime('now')
             """,
-            (user_id, path, 1 if include_project else 0),
+            (user_id, path),
         )
         conn.commit()
     return True, "配置已保存"
@@ -92,18 +91,14 @@ def validate_knowledge_path(raw_path: str) -> tuple[bool, str]:
     return True, str(path)
 
 
-def resolve_knowledge_dirs(knowledge_dir: str, include_project: bool) -> list[Path]:
-    """根据表单值预览/解析索引目录（无需先写入数据库）。"""
-    from agent.rag import KNOWLEDGE_DIR
-
-    dirs: list[Path] = []
-    if knowledge_dir.strip():
-        ok, resolved = validate_knowledge_path(knowledge_dir)
-        if ok:
-            dirs.append(Path(resolved))
-    if include_project and KNOWLEDGE_DIR.is_dir():
-        dirs.append(KNOWLEDGE_DIR)
-    return dirs
+def resolve_knowledge_dirs(knowledge_dir: str) -> list[Path]:
+    """根据表单值预览索引目录（无需先写入数据库）。"""
+    if not knowledge_dir.strip():
+        return []
+    ok, resolved = validate_knowledge_path(knowledge_dir)
+    if not ok:
+        return []
+    return [Path(resolved)]
 
 
 def count_md_files(*dirs: Path) -> int:

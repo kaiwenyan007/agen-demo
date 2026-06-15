@@ -18,10 +18,11 @@ load_dotenv()
 
 import streamlit as st
 
-from agent.startup_bootstrap import configure_startup_logging, schedule_startup_bootstrap
+from agent.startup_bootstrap import (
+    configure_startup_logging,
+)
 
 configure_startup_logging()
-schedule_startup_bootstrap()
 
 st.set_page_config(
     page_title="Agent Demo",
@@ -53,6 +54,7 @@ def _init_session() -> None:
         "model_options": None,
         "model_fetch_error": None,
         "pending_reply": None,
+        "boot_skipped": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -71,14 +73,18 @@ def logout() -> None:
 
 def _enter_app(user_id: int) -> None:
     """登录/注册成功后进入主界面，并恢复最近会话。"""
+    from agent.startup_bootstrap import ensure_full_bootstrap_scheduled
     from db.auth import get_username
     from db.conversations import list_conversations
 
     st.session_state.user_id = user_id
     st.session_state.username = get_username(user_id)
     st.session_state.page = "chat"
+    st.session_state.boot_skipped = False
+    st.session_state.pop("_boot_start_ts", None)
     convs = list_conversations(user_id)
     st.session_state.conversation_id = convs[0]["id"] if convs else None
+    ensure_full_bootstrap_scheduled()
     st.rerun()
 
 
@@ -101,6 +107,7 @@ def render_auth() -> None:
     st.markdown("---")
 
     if st.session_state.auth_mode == "login":
+        from db.auth import login_user as do_login
         from web.auth_remember import clear_remembered, load_remembered, save_remembered
 
         if not st.session_state.get("_login_prefilled"):
@@ -111,26 +118,34 @@ def render_auth() -> None:
                 st.session_state.remember_login = True
             st.session_state._login_prefilled = True
 
-        username = st.text_input(
-            "USERNAME",
-            key="login_user",
-            placeholder="root@local",
-            autocomplete="username",
-        )
-        password = st.text_input(
-            "PASSWORD",
-            type="password",
-            key="login_pass",
-            autocomplete="current-password",
-        )
-        remember = st.checkbox(
-            "记住账号密码（仅本机 data 目录，公共电脑请勿勾选）",
-            key="remember_login",
-        )
-        if st.button(">> AUTHENTICATE", use_container_width=True, type="primary", key="login_btn"):
-            from db.auth import login_user
+        with st.form("login_form", clear_on_submit=False):
+            st.text_input(
+                "USERNAME",
+                key="login_user",
+                placeholder="root@local",
+                autocomplete="username",
+            )
+            st.text_input(
+                "PASSWORD",
+                type="password",
+                key="login_pass",
+                autocomplete="current-password",
+            )
+            st.checkbox(
+                "记住账号密码（仅本机 data 目录，公共电脑请勿勾选）",
+                key="remember_login",
+            )
+            submitted = st.form_submit_button(
+                ">> AUTHENTICATE",
+                use_container_width=True,
+                type="primary",
+            )
 
-            user_id, msg = login_user(username, password)
+        if submitted:
+            username = st.session_state.get("login_user", "").strip()
+            password = st.session_state.get("login_pass", "")
+            remember = st.session_state.get("remember_login", False)
+            user_id, msg = do_login(username, password)
             if user_id:
                 if remember:
                     save_remembered(username, password)
@@ -140,12 +155,22 @@ def render_auth() -> None:
             else:
                 st.error(f"[DENIED] {msg}")
     else:
-        new_user = st.text_input("NEW USER", key="reg_user", placeholder="hacker007")
-        new_pass = st.text_input("PASSWORD", type="password", key="reg_pass")
-        new_pass2 = st.text_input("CONFIRM", type="password", key="reg_pass2")
-        if st.button(">> CREATE ACCOUNT", use_container_width=True, type="primary", key="register_btn"):
-            from db.auth import register_user
+        from db.auth import register_user
 
+        with st.form("register_form", clear_on_submit=False):
+            st.text_input("NEW USER", key="reg_user", placeholder="hacker007")
+            st.text_input("PASSWORD", type="password", key="reg_pass")
+            st.text_input("CONFIRM", type="password", key="reg_pass2")
+            submitted = st.form_submit_button(
+                ">> CREATE ACCOUNT",
+                use_container_width=True,
+                type="primary",
+            )
+
+        if submitted:
+            new_user = st.session_state.get("reg_user", "").strip()
+            new_pass = st.session_state.get("reg_pass", "")
+            new_pass2 = st.session_state.get("reg_pass2", "")
             if new_pass != new_pass2:
                 st.error("[ERR] 两次密码不一致")
             else:
@@ -257,7 +282,7 @@ def render_knowledge() -> None:
 
     st.info(
         "在本机运行 `streamlit run web/app.py` 时，Python 进程可直接读取你填写的 Windows 路径。"
-        "可点击「选择文件夹」用系统对话框选取目录。修改 md 文件后请点击「重建索引」。"
+        "仅索引你配置的本机目录，不包含项目内置 knowledge/。修改 md 后请点击「重建索引」。"
     )
 
     draft_key = f"knowledge_dir_draft_{user_id}"
@@ -282,39 +307,41 @@ def render_knowledge() -> None:
             placeholder=r"C:\Users\你的用户名\Documents\notes",
             help="可手动输入路径，或用左侧按钮选择文件夹",
         )
-    include_project = st.checkbox(
-        "同时索引项目公共库 knowledge/",
-        value=cfg.include_project,
-    )
 
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("SAVE PATH", use_container_width=True):
-            ok, msg = save_user_knowledge_config(user_id, knowledge_dir, include_project)
+            ok, msg = save_user_knowledge_config(user_id, knowledge_dir)
             if ok:
-                reset_vectorstore(user_id)
-                st.success(f"[OK] {msg}，请重建索引")
+                try:
+                    reset_vectorstore(user_id)
+                    st.success(f"[OK] {msg}，请重建索引")
+                except (PermissionError, RuntimeError, OSError) as e:
+                    st.warning(f"[WARN] 路径已保存，但旧索引未能立即清除：{e}")
             else:
                 st.error(f"[ERR] {msg}")
     with col2:
         if st.button("SCAN", use_container_width=True):
-            dirs = resolve_knowledge_dirs(knowledge_dir, include_project)
+            dirs = resolve_knowledge_dirs(knowledge_dir)
             if not dirs:
-                st.warning("请先填写有效目录，或勾选公共库")
+                st.warning("请先填写有效的本机知识库目录")
             else:
                 n = count_md_files(*dirs)
-                st.success(f"发现 {n} 个 .md 文件")
+                st.success(f"发现 {n} 个 .md 文件（仅 .md 会被 RAG 索引）")
                 for d in dirs:
-                    st.caption(str(d))
+                    md_n = len(list(d.rglob("*.md")))
+                    st.caption(f"知识库: `{d}` → {md_n} 个 .md")
+                    if md_n == 0:
+                        st.warning("目录下没有 .md 文件，请放入 Markdown 或更换目录")
     with col3:
         rebuild = st.button("REBUILD INDEX", type="primary", use_container_width=True)
 
     if rebuild:
         dirs = get_knowledge_dirs(user_id)
         if not dirs:
-            st.error("没有可索引的目录。请填写本机路径或勾选公共库。")
+            st.error("没有可索引的目录。请先在上方填写本机知识库路径并 SAVE PATH。")
         else:
-            save_user_knowledge_config(user_id, knowledge_dir, include_project)
+            save_user_knowledge_config(user_id, knowledge_dir)
             status = st.empty()
             try:
                 status.markdown("⏳ 正在扫描 md 并构建向量索引…")
@@ -345,7 +372,7 @@ def render_knowledge() -> None:
 
 
 def render_stats() -> None:
-    from db.rag_stats import get_chroma_cache_summary, get_recent_rag_queries, get_user_rag_summary
+    from db.rag_stats import get_recent_rag_queries
     from db.token_stats import get_recent_usage, get_user_token_by_model, get_user_token_summary
 
     st.header("📊 TOKEN & RAG METRICS")
@@ -401,7 +428,7 @@ def _render_kb_metrics_fragment() -> None:
 
     st.subheader("KNOWLEDGE BASE & CACHE")
     with st.spinner("正在读取向量库…"):
-        kb = get_knowledge_base_info(st.session_state.user_id)
+        kb = get_knowledge_base_info(st.session_state.user_id, load_vectorstore=True)
     rag = get_user_rag_summary(st.session_state.user_id)
     cache = get_chroma_cache_summary()
 
@@ -544,6 +571,14 @@ def main() -> None:
 
     if is_auth:
         render_auth()
+        return
+
+    from web.warmup import is_agent_ready
+
+    if not is_agent_ready() and not st.session_state.get("boot_skipped"):
+        from web.boot_sequence import render_boot_sequence
+
+        render_boot_sequence()
         return
 
     render_sidebar()
