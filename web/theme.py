@@ -174,6 +174,17 @@ h1, h2, h3, h4 {{
     overflow-wrap: anywhere;
 }}
 
+.agent-status {{
+    color: {MUTED};
+    font-size: 0.82rem;
+    margin: 0 0 0.25rem 0;
+    letter-spacing: 0.03em;
+}}
+
+.agent-status span {{
+    color: {CYAN};
+}}
+
 [data-testid="stMetric"] {{
     background: {PANEL};
     border: 1px solid {BORDER};

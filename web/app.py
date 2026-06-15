@@ -18,6 +18,11 @@ load_dotenv()
 
 import streamlit as st
 
+from agent.startup_bootstrap import configure_startup_logging, schedule_startup_bootstrap
+
+configure_startup_logging()
+schedule_startup_bootstrap()
+
 st.set_page_config(
     page_title="Agent Demo",
     page_icon="🤖",
@@ -43,6 +48,7 @@ def _init_session() -> None:
         "user_id": None,
         "username": None,
         "page": "chat",
+        "auth_mode": "login",
         "conversation_id": None,
         "model_options": None,
         "model_fetch_error": None,
@@ -62,6 +68,19 @@ def logout() -> None:
     _init_session()
 
 
+def _enter_app(user_id: int) -> None:
+    """登录/注册成功后进入主界面，并恢复最近会话。"""
+    from db.auth import get_username
+    from db.conversations import list_conversations
+
+    st.session_state.user_id = user_id
+    st.session_state.username = get_username(user_id)
+    st.session_state.page = "chat"
+    convs = list_conversations(user_id)
+    st.session_state.conversation_id = convs[0]["id"] if convs else None
+    st.rerun()
+
+
 def render_auth() -> None:
     from web.theme import render_hack_logo
 
@@ -69,45 +88,45 @@ def render_auth() -> None:
     st.title("AGENT DEMO")
     st.caption("// SECURE ACCESS · RAG NEURAL INTERFACE v0.7")
 
-    tab_login, tab_register = st.tabs(["[ LOGIN ]", "[ REGISTER ]"])
+    st.radio(
+        "auth_tab",
+        options=["login", "register"],
+        format_func=lambda v: "[ LOGIN ]" if v == "login" else "[ REGISTER ]",
+        horizontal=True,
+        label_visibility="collapsed",
+        key="auth_mode",
+    )
 
-    with tab_login:
-        with st.form("login_form", clear_on_submit=False):
-            username = st.text_input("USERNAME", key="login_user", placeholder="root@local")
-            password = st.text_input("PASSWORD", type="password", key="login_pass")
-            if st.form_submit_button(">> AUTHENTICATE", use_container_width=True):
-                from db.auth import get_username, login_user
+    st.markdown("---")
 
-                user_id, msg = login_user(username, password)
-                if user_id:
-                    st.session_state.user_id = user_id
-                    st.session_state.username = get_username(user_id)
-                    st.session_state.page = "chat"
-                    st.rerun()
+    if st.session_state.auth_mode == "login":
+        username = st.text_input("USERNAME", key="login_user", placeholder="root@local")
+        password = st.text_input("PASSWORD", type="password", key="login_pass")
+        if st.button(">> AUTHENTICATE", use_container_width=True, type="primary", key="login_btn"):
+            from db.auth import login_user
+
+            user_id, msg = login_user(username, password)
+            if user_id:
+                _enter_app(user_id)
+            else:
+                st.error(f"[DENIED] {msg}")
+    else:
+        new_user = st.text_input("NEW USER", key="reg_user", placeholder="hacker007")
+        new_pass = st.text_input("PASSWORD", type="password", key="reg_pass")
+        new_pass2 = st.text_input("CONFIRM", type="password", key="reg_pass2")
+        if st.button(">> CREATE ACCOUNT", use_container_width=True, type="primary", key="register_btn"):
+            from db.auth import register_user
+
+            if new_pass != new_pass2:
+                st.error("[ERR] 两次密码不一致")
+            else:
+                ok, msg, user_id = register_user(new_user, new_pass)
+                if ok and user_id:
+                    _enter_app(user_id)
+                elif ok:
+                    st.error("[ERR] 注册成功但无法自动登录")
                 else:
-                    st.error(f"[DENIED] {msg}")
-
-    with tab_register:
-        with st.form("register_form", clear_on_submit=False):
-            new_user = st.text_input("NEW USER", key="reg_user", placeholder="hacker007")
-            new_pass = st.text_input("PASSWORD", type="password", key="reg_pass")
-            new_pass2 = st.text_input("CONFIRM", type="password", key="reg_pass2")
-            if st.form_submit_button(">> CREATE ACCOUNT", use_container_width=True):
-                from db.auth import get_username, register_user
-
-                if new_pass != new_pass2:
-                    st.error("[ERR] 两次密码不一致")
-                else:
-                    ok, msg, user_id = register_user(new_user, new_pass)
-                    if ok and user_id:
-                        st.session_state.user_id = user_id
-                        st.session_state.username = get_username(user_id)
-                        st.session_state.page = "chat"
-                        st.rerun()
-                    elif ok:
-                        st.error("[ERR] 注册成功但无法自动登录")
-                    else:
-                        st.error(f"[ERR] {msg}")
+                    st.error(f"[ERR] {msg}")
 
 
 def render_sidebar() -> None:
@@ -191,8 +210,6 @@ def render_settings() -> None:
 
 
 def render_stats() -> None:
-    from agent.rag import get_knowledge_base_info
-    from agent.startup_splash import run_with_streamlit_splash
     from db.rag_stats import get_chroma_cache_summary, get_recent_rag_queries, get_user_rag_summary
     from db.token_stats import get_recent_usage, get_user_token_by_model, get_user_token_summary
 
@@ -205,22 +222,7 @@ def render_stats() -> None:
     c3.metric("COMPLETION", f"{summary['completion_tokens']:,}")
     c4.metric("COST ¥", f"{summary['estimated_cost']:.4f}")
 
-    st.subheader("KNOWLEDGE BASE & CACHE")
-    kb = run_with_streamlit_splash(get_knowledge_base_info, placeholder=st.empty())
-    rag = get_user_rag_summary(st.session_state.user_id)
-    cache = get_chroma_cache_summary()
-
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("DOCS", kb["doc_count"])
-    k2.metric("CHUNKS", kb["chunk_count"])
-    k3.metric("RAG QUERIES", rag["query_count"])
-    k4.metric("HIT RATE", f"{rag['hit_rate']:.1f}%")
-    k5.metric("CACHE HIT", f"{cache['cache_hit_rate']:.1f}%")
-
-    st.caption(
-        f"memory={cache['memory_hit']} · disk={cache['disk_hit']} · rebuild={cache['rebuild']} · "
-        f"vector={rag['vector_count']} · keyword={rag['keyword_count']}"
-    )
+    _render_kb_metrics_fragment()
 
     st.subheader("RAG LOG")
     rag_recent = get_recent_rag_queries(st.session_state.user_id)
@@ -256,22 +258,44 @@ def render_stats() -> None:
         st.info("[EMPTY] 暂无使用记录")
 
 
+@st.fragment
+def _render_kb_metrics_fragment() -> None:
+    """知识库统计单独 fragment 加载，不阻塞 Token 指标先显示。"""
+    from agent.rag import get_knowledge_base_info
+    from db.rag_stats import get_chroma_cache_summary, get_user_rag_summary
+
+    st.subheader("KNOWLEDGE BASE & CACHE")
+    with st.spinner("正在读取向量库…"):
+        kb = get_knowledge_base_info()
+    rag = get_user_rag_summary(st.session_state.user_id)
+    cache = get_chroma_cache_summary()
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("DOCS", kb["doc_count"])
+    k2.metric("CHUNKS", kb["chunk_count"])
+    k3.metric("RAG QUERIES", rag["query_count"])
+    k4.metric("HIT RATE", f"{rag['hit_rate']:.1f}%")
+    k5.metric("CACHE HIT", f"{cache['cache_hit_rate']:.1f}%")
+
+    st.caption(
+        f"memory={cache['memory_hit']} · disk={cache['disk_hit']} · rebuild={cache['rebuild']} · "
+        f"vector={rag['vector_count']} · keyword={rag['keyword_count']}"
+    )
+
+
 def render_chat() -> None:
-    from agent.langchain_agent import run_agent
-    from agent.startup_splash import run_with_streamlit_splash
     from db.api_config import get_user_api_config, is_api_configured
     from db.conversations import (
         add_message,
         create_conversation,
         get_messages,
         list_conversations,
-        messages_to_chat_history,
         update_conversation_title,
     )
-    from db.token_stats import record_token_usage
 
     if not is_api_configured(st.session_state.user_id):
         st.warning("[WARN] 请先在 API CONFIG 中配置 Key / URL / Model")
+        st.chat_input(">> 输入指令...", disabled=True)
         return
 
     if st.session_state.conversation_id is None:
@@ -286,37 +310,70 @@ def render_chat() -> None:
 
     st.subheader("💬 NEURAL CHAT")
 
+    from web.warmup import current_warm_phase, is_agent_ready
+
+    if not is_agent_ready():
+        st.caption(f"⏳ {current_warm_phase()} · 首条消息可能稍慢，请稍候")
+
     for msg in messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     pending = st.session_state.pending_reply
     if pending and pending.get("conv_id") == conv_id:
+        from agent.langchain_agent import iter_agent_reply_events
+        from db.conversations import messages_to_chat_history
+        from db.token_stats import record_token_usage
+        from web.warmup import wait_agent_ready
+
         user_id = st.session_state.user_id
         cfg = get_user_api_config(user_id)
         history = messages_to_chat_history(messages[:-1])
         prompt_text = pending["prompt"]
 
         with st.chat_message("assistant"):
-            splash = st.empty()
+            status_ph = st.empty()
+            answer_ph = st.empty()
+            reply_parts: list[str] = []
 
-            def _invoke():
-                # session_state 不可在后台线程访问，闭包捕获主线程变量
-                return run_agent(
-                    prompt_text,
-                    cfg,
-                    chat_history=history,
-                    verbose=False,
-                    user_id=user_id,
-                    conversation_id=conv_id,
+            def _show_status(text: str) -> None:
+                status_ph.markdown(
+                    f'<p class="agent-status">⏳ <span>{text}</span></p>',
+                    unsafe_allow_html=True,
                 )
 
+            _show_status("正在准备 Agent 引擎…")
+            wait_agent_ready(on_phase=_show_status)
+
+            events, token_handler = iter_agent_reply_events(
+                prompt_text,
+                cfg,
+                chat_history=history,
+                verbose=False,
+                user_id=user_id,
+                conversation_id=conv_id,
+            )
+
             try:
-                reply, usage = run_with_streamlit_splash(_invoke, placeholder=splash)
+                for kind, text in events:
+                    if kind == "status":
+                        _show_status(text)
+                    else:
+                        reply_parts.append(text)
+                        if reply_parts:
+                            status_ph.empty()
+                        answer_ph.markdown("".join(reply_parts))
             except Exception as e:
-                reply = f"[FAIL] 调用失败: {e}"
-                usage = None
-            st.markdown(reply)
+                status_ph.empty()
+                reply_parts = [f"[FAIL] 调用失败: {e}"]
+                answer_ph.markdown(reply_parts[0])
+
+            reply = "".join(reply_parts).strip()
+            if not reply:
+                status_ph.empty()
+                reply = "[FAIL] 模型未返回内容"
+                answer_ph.markdown(reply)
+            usage = token_handler.usage
 
         add_message(conv_id, "assistant", reply)
         if usage and usage.total_tokens > 0:
@@ -328,7 +385,7 @@ def render_chat() -> None:
                 usage.completion_tokens,
             )
         st.session_state.pending_reply = None
-        return
+        st.rerun()
 
     if prompt := st.chat_input(">> 输入指令..."):
         add_message(conv_id, "user", prompt)

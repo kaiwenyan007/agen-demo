@@ -12,6 +12,10 @@ from rich.markdown import Markdown
 
 load_dotenv()
 
+from agent.startup_bootstrap import configure_startup_logging, run_startup_bootstrap
+
+configure_startup_logging()
+
 console = Console()
 USE_LANGCHAIN = os.getenv("USE_LANGCHAIN", "1") == "1"
 _rag_ready = False
@@ -101,4 +105,7 @@ def run_chat() -> None:
 if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    result = run_startup_bootstrap()
+    if not result.ok:
+        console.print(f"[red]启动预热失败: {result.error}[/]")
     run_chat()

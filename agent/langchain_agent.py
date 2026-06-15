@@ -2,9 +2,10 @@
 LangChain Agent 模块 —— 支持用户级 API 配置与 Token 统计。
 """
 
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -64,6 +65,14 @@ def query_knowledge_base(question: str) -> str:
 
 TOOLS = [get_current_time, calculate_tool, read_file, list_files, query_knowledge_base]
 
+_TOOL_LABELS = {
+    "get_current_time": "获取时间",
+    "calculate_tool": "计算器",
+    "read_file": "读文件",
+    "list_files": "列目录",
+    "query_knowledge_base": "知识库检索",
+}
+
 
 def build_agent_executor(config: UserApiConfig, verbose: bool = False) -> AgentExecutor:
     llm = ChatOpenAI(
@@ -113,3 +122,86 @@ def run_agent(
 
     output = result.get("output", "")
     return str(output), handler.usage
+
+
+def stream_agent_reply(
+        user_input: str,
+        config: UserApiConfig,
+        chat_history: list | None = None,
+        verbose: bool = False,
+        user_id: int | None = None,
+        conversation_id: int | None = None,
+) -> tuple[Iterator[str], TokenUsageCallbackHandler]:
+    """流式运行 Agent，yield 工具状态与最终回复片段；返回 handler 供统计 token。"""
+    events, handler = iter_agent_reply_events(
+        user_input,
+        config,
+        chat_history=chat_history,
+        verbose=verbose,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+
+    def _text_only() -> Iterator[str]:
+        for kind, text in events:
+            if kind == "content":
+                yield text
+
+    return _text_only(), handler
+
+
+def iter_agent_reply_events(
+        user_input: str,
+        config: UserApiConfig,
+        chat_history: list | None = None,
+        verbose: bool = False,
+        user_id: int | None = None,
+        conversation_id: int | None = None,
+) -> tuple[Iterator[tuple[Literal["status", "content"], str]], TokenUsageCallbackHandler]:
+    """按阶段 yield 状态提示与回复正文，供 Web UI 分区域展示。"""
+    handler = TokenUsageCallbackHandler()
+    seen_tools: set[str] = set()
+    last_output = ""
+
+    def _gen() -> Iterator[tuple[Literal["status", "content"], str]]:
+        nonlocal last_output
+        yield ("status", "正在初始化 Agent 引擎…")
+        executor = build_agent_executor(config, verbose=verbose)
+        yield ("status", f"正在连接模型 `{config.model}` …")
+        yield ("status", "正在理解问题并规划步骤…")
+
+        invoke_config: RunnableConfig = {"callbacks": [handler]}
+        ctx_token: RagRequestContext | None = set_rag_context(user_id, conversation_id)
+        try:
+            for chunk in executor.stream(
+                    {"input": user_input, "chat_history": chat_history or []},
+                    config=invoke_config,
+            ):
+                if not isinstance(chunk, dict):
+                    continue
+                actions = chunk.get("actions") or []
+                for action in actions:
+                    tool = getattr(action, "tool", None) or "tool"
+                    if tool in seen_tools:
+                        continue
+                    seen_tools.add(tool)
+                    label = _TOOL_LABELS.get(tool, tool)
+                    yield ("status", f"正在调用：{label}")
+                output = chunk.get("output")
+                if not output:
+                    continue
+                text = str(output)
+                if not last_output and text:
+                    yield ("status", "正在生成回复…")
+                if text.startswith(last_output):
+                    delta = text[len(last_output):]
+                    if delta:
+                        yield ("content", delta)
+                    last_output = text
+                else:
+                    yield ("content", text)
+                    last_output = text
+        finally:
+            reset_rag_context(ctx_token)
+
+    return _gen(), handler
