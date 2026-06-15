@@ -29,6 +29,10 @@ def register_user(username: str, password: str) -> tuple[bool, str, int | None]:
                 "INSERT INTO user_api_configs (user_id) VALUES (?)",
                 (user_id,),
             )
+            conn.execute(
+                "INSERT INTO user_knowledge_configs (user_id) VALUES (?)",
+                (user_id,),
+            )
             conn.commit()
         return True, "注册成功", user_id
     except Exception as e:

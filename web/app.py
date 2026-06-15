@@ -136,6 +136,8 @@ def render_sidebar() -> None:
         st.session_state.page = "chat"
     if st.sidebar.button("⚙️ API CONFIG", use_container_width=True):
         st.session_state.page = "settings"
+    if st.sidebar.button("📚 KNOWLEDGE", use_container_width=True):
+        st.session_state.page = "knowledge"
     if st.sidebar.button("📊 TOKEN STATS", use_container_width=True):
         st.session_state.page = "stats"
 
@@ -209,6 +211,110 @@ def render_settings() -> None:
         st.rerun()
 
 
+def render_knowledge() -> None:
+    from agent.rag import build_vectorstore, get_knowledge_base_info, get_knowledge_dirs, reset_vectorstore, user_chroma_dir
+    from db.user_knowledge import (
+        count_md_files,
+        get_user_knowledge_config,
+        resolve_knowledge_dirs,
+        save_user_knowledge_config,
+    )
+
+    user_id = st.session_state.user_id
+    cfg = get_user_knowledge_config(user_id)
+
+    st.header("📚 LOCAL KNOWLEDGE")
+    st.caption("// 本机 Streamlit：可索引 C 盘等本地 md 目录 · 每人独立向量库")
+
+    st.info(
+        "在本机运行 `streamlit run web/app.py` 时，Python 进程可直接读取你填写的 Windows 路径。"
+        "可点击「选择文件夹」用系统对话框选取目录。修改 md 文件后请点击「重建索引」。"
+    )
+
+    draft_key = f"knowledge_dir_draft_{user_id}"
+    if draft_key not in st.session_state:
+        st.session_state[draft_key] = cfg.knowledge_dir
+
+    pick_col, input_col = st.columns([1, 3])
+    with pick_col:
+        if st.button("📁 选择文件夹", use_container_width=True):
+            from web.local_folder import pick_local_folder
+
+            picked = pick_local_folder(title="选择 Markdown 知识库目录")
+            if picked:
+                st.session_state[draft_key] = picked
+                st.rerun()
+            else:
+                st.warning("未选择文件夹（或当前环境不支持对话框）")
+    with input_col:
+        knowledge_dir = st.text_input(
+            "KNOWLEDGE_DIR",
+            key=draft_key,
+            placeholder=r"C:\Users\你的用户名\Documents\notes",
+            help="可手动输入路径，或用左侧按钮选择文件夹",
+        )
+    include_project = st.checkbox(
+        "同时索引项目公共库 knowledge/",
+        value=cfg.include_project,
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("SAVE PATH", use_container_width=True):
+            ok, msg = save_user_knowledge_config(user_id, knowledge_dir, include_project)
+            if ok:
+                reset_vectorstore(user_id)
+                st.success(f"[OK] {msg}，请重建索引")
+            else:
+                st.error(f"[ERR] {msg}")
+    with col2:
+        if st.button("SCAN", use_container_width=True):
+            dirs = resolve_knowledge_dirs(knowledge_dir, include_project)
+            if not dirs:
+                st.warning("请先填写有效目录，或勾选公共库")
+            else:
+                n = count_md_files(*dirs)
+                st.success(f"发现 {n} 个 .md 文件")
+                for d in dirs:
+                    st.caption(str(d))
+    with col3:
+        rebuild = st.button("REBUILD INDEX", type="primary", use_container_width=True)
+
+    if rebuild:
+        dirs = get_knowledge_dirs(user_id)
+        if not dirs:
+            st.error("没有可索引的目录。请填写本机路径或勾选公共库。")
+        else:
+            save_user_knowledge_config(user_id, knowledge_dir, include_project)
+            status = st.empty()
+            try:
+                status.markdown("⏳ 正在扫描 md 并构建向量索引…")
+                build_vectorstore(user_id=user_id, force_rebuild=True)
+                info = get_knowledge_base_info(user_id)
+                status.success(
+                    f"[OK] 索引完成：{info['doc_count']} 篇 md → {info['chunk_count']} 个片段"
+                )
+            except Exception as e:
+                status.error(f"[FAIL] 索引失败: {e}")
+
+    st.divider()
+    st.subheader("STATUS")
+    dirs = get_knowledge_dirs(user_id)
+    if dirs:
+        for d in dirs:
+            st.markdown(f"- `{d}`")
+    else:
+        st.markdown("- _未配置目录_")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("DOCS", cfg.doc_count)
+    c2.metric("CHUNKS", cfg.chunk_count)
+    c3.metric("LAST INDEX", cfg.last_indexed_at or "—")
+
+    chroma_path = user_chroma_dir(user_id)
+    st.caption(f"向量库路径: `{chroma_path}`")
+
+
 def render_stats() -> None:
     from db.rag_stats import get_chroma_cache_summary, get_recent_rag_queries, get_user_rag_summary
     from db.token_stats import get_recent_usage, get_user_token_by_model, get_user_token_summary
@@ -266,7 +372,7 @@ def _render_kb_metrics_fragment() -> None:
 
     st.subheader("KNOWLEDGE BASE & CACHE")
     with st.spinner("正在读取向量库…"):
-        kb = get_knowledge_base_info()
+        kb = get_knowledge_base_info(st.session_state.user_id)
     rag = get_user_rag_summary(st.session_state.user_id)
     cache = get_chroma_cache_summary()
 
@@ -281,6 +387,8 @@ def _render_kb_metrics_fragment() -> None:
         f"memory={cache['memory_hit']} · disk={cache['disk_hit']} · rebuild={cache['rebuild']} · "
         f"vector={rag['vector_count']} · keyword={rag['keyword_count']}"
     )
+    if kb.get("source_dirs"):
+        st.caption("sources: " + " | ".join(kb["source_dirs"]))
 
 
 def render_chat() -> None:
@@ -414,6 +522,8 @@ def main() -> None:
     page = st.session_state.page
     if page == "settings":
         render_settings()
+    elif page == "knowledge":
+        render_knowledge()
     elif page == "stats":
         render_stats()
     else:

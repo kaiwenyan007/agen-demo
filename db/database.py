@@ -76,6 +76,17 @@ CREATE TABLE IF NOT EXISTS chroma_cache_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rag_queries_user ON rag_queries(user_id);
+
+CREATE TABLE IF NOT EXISTS user_knowledge_configs (
+    user_id INTEGER PRIMARY KEY,
+    knowledge_dir TEXT NOT NULL DEFAULT '',
+    include_project INTEGER NOT NULL DEFAULT 1,
+    last_indexed_at TEXT,
+    doc_count INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 """
 
 
