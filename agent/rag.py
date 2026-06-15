@@ -10,7 +10,7 @@ RAG（检索增强生成）模块 —— 让 Agent 能「查资料再回答」�
   6. 把找到的片段返回给 Agent，作为回答依据
 
 对外主要接口：
-  - build_vectorstore()  构建或加载向量库（程序启动时调用）
+  - build_vectorstore()  按需构建或加载向量库（首次 RAG 检索时调用）
   - search_knowledge()   根据问题检索知识库（Agent 工具内部调用）
   - reset_vectorstore()  清空向量库（/reindex 重建时内部使用）
 """
@@ -20,6 +20,8 @@ import re
 import shutil
 from pathlib import Path
 
+from agent.rag_context import get_rag_context
+from db.rag_stats import record_chroma_event, record_rag_query
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
@@ -53,6 +55,40 @@ _RECOVERABLE_ERRORS = (
     ConnectionError,
     TimeoutError,
 )
+
+
+def _resolve_local_model_path(raw_path: str) -> str | None:
+    """
+    解析 .env 中的 LOCAL_EMBEDDING_MODEL_PATH。
+
+    相对路径一律基于项目根目录（PROJECT_ROOT），避免从 web/ 等子目录
+    启动时因工作目录不同而找不到 models/。
+    """
+    if not raw_path:
+        return None
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return str(path.resolve()) if path.is_dir() else None
+
+
+class _LazyEmbeddings(Embeddings):
+    """延迟加载 Embedding 模型；Chroma 从磁盘恢复时无需立刻加载大模型。"""
+
+    def __init__(self, loader=None):
+        self._loader = loader or get_embeddings
+        self._inner: Embeddings | None = None
+
+    def _get(self) -> Embeddings:
+        if self._inner is None:
+            self._inner = self._loader()
+        return self._inner
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._get().embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._get().embed_query(text)
 
 
 class _KeywordEmbeddings(Embeddings):
@@ -119,6 +155,13 @@ def _load_documents() -> list[Document]:
     return splitter.split_documents(docs)
 
 
+def _ensure_keyword_chunks() -> list[Document]:
+    global _keyword_chunks
+    if _keyword_chunks is None:
+        _keyword_chunks = _load_documents()
+    return _keyword_chunks
+
+
 def get_embeddings() -> Embeddings:
     """
     获取 Embedding 模型（只创建一次，之后复用）。
@@ -143,7 +186,9 @@ def get_embeddings() -> Embeddings:
     if os.getenv("USE_LOCAL_EMBEDDING", "0") == "1":
         from langchain_huggingface import HuggingFaceEmbeddings
 
-        model_path = os.getenv("LOCAL_EMBEDDING_MODEL_PATH", "").strip()
+        model_path = _resolve_local_model_path(
+            os.getenv("LOCAL_EMBEDDING_MODEL_PATH", "").strip()
+        )
         if not model_path:
             model_name = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
             # 优先从 ModelScope 下载（国内网络更稳定）
@@ -215,34 +260,34 @@ def build_vectorstore(force_rebuild: bool = False) -> Chroma:
 
     # 进程内已有实例，直接复用
     if _vectorstore is not None:
+        record_chroma_event("memory_hit")
         return _vectorstore
 
-    # 始终加载文档切块（关键词回退模式也需要）
-    chunks = _load_documents()
-    _keyword_chunks = chunks
-    embeddings = get_embeddings()
-
-    # 尝试从磁盘加载已有索引（避免每次启动都重新 Embedding）
+    # 优先从磁盘加载（延迟 Embedding 模型，跳过文档切块）
     if CHROMA_DIR.exists() and not force_rebuild:
         try:
             _vectorstore = Chroma(
                 persist_directory=str(CHROMA_DIR),
-                embedding_function=embeddings,  # 查询时仍需要 Embedding 模型
+                embedding_function=_LazyEmbeddings(),
             )
-            # count() > 0 确保不是空目录被误判为「已有索引」
             if _vectorstore._collection.count() > 0:
+                record_chroma_event("disk_hit")
                 return _vectorstore
         except _RECOVERABLE_ERRORS:
-            # 索引文件损坏时，删掉重建
+            _vectorstore = None
             if CHROMA_DIR.exists():
                 shutil.rmtree(CHROMA_DIR)
 
-    # 全量建索引：文档切块 → 向量化 → 持久化到 .chroma/
+    # 全量重建：读文档 → 切分 → 向量化 → 写入 .chroma/
+    chunks = _load_documents()
+    _keyword_chunks = chunks
+    embeddings = get_embeddings()
     _vectorstore = Chroma.from_documents(
         chunks,
         embeddings,
         persist_directory=str(CHROMA_DIR),
     )
+    record_chroma_event("rebuild")
     return _vectorstore
 
 
@@ -257,7 +302,7 @@ def _keyword_search(query: str, k: int = 3) -> list[Document]:
       query  用户问题
       k      返回最相关的前 k 个片段（默认 3）
     """
-    chunks = _keyword_chunks or _load_documents()
+    chunks = _ensure_keyword_chunks()
     query_tokens = set(re.findall(r"[\u4e00-\u9fff]+|[a-zA-Z0-9_]+", query.lower()))
     scored: list[tuple[int, Document]] = []
     for doc in chunks:
@@ -286,14 +331,27 @@ def search_knowledge(query: str, k: int = 3) -> str:
     if _use_keyword_fallback or os.getenv("USE_KEYWORD_FALLBACK", "0") == "1":
         # 关键词模式：不访问 Chroma，直接在内存中的 chunks 里匹配
         results = _keyword_search(query, k=k)
+        search_mode = "keyword"
     else:
         try:
             vs = build_vectorstore()
             # 把问题向量化，在 Chroma 中找余弦距离最近的 k 个片段
             results = vs.similarity_search(query, k=k)
+            search_mode = "vector"
         except _RECOVERABLE_ERRORS:
             # 向量检索失败（如 API 超时），降级到关键词匹配
             results = _keyword_search(query, k=k)
+            search_mode = "keyword"
+
+    ctx = get_rag_context()
+    record_rag_query(
+        user_id=ctx.user_id if ctx else None,
+        conversation_id=ctx.conversation_id if ctx else None,
+        query=query,
+        hit=bool(results),
+        result_count=len(results),
+        search_mode=search_mode,
+    )
 
     if not results:
         return "知识库中未找到相关内容。"
@@ -302,3 +360,20 @@ def search_knowledge(query: str, k: int = 3) -> str:
         source = doc.metadata.get("source", "unknown")
         parts.append(f"[片段{i} | {source}]\n{doc.page_content}")
     return "\n\n".join(parts)
+
+
+def get_knowledge_base_info() -> dict:
+    """返回知识库与向量索引的当前状态（供统计页展示）。"""
+    md_files = list(KNOWLEDGE_DIR.glob("**/*.md")) if KNOWLEDGE_DIR.exists() else []
+    chunk_count = 0
+    try:
+        vs = build_vectorstore()
+        chunk_count = vs._collection.count()
+    except _RECOVERABLE_ERRORS:
+        pass
+    return {
+        "doc_count": len(md_files),
+        "chunk_count": chunk_count,
+        "chroma_ready": CHROMA_DIR.exists() and chunk_count > 0,
+    }
+

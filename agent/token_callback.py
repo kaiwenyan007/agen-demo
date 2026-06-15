@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
@@ -19,7 +19,9 @@ class TokenUsage:
 class TokenUsageCallbackHandler(BaseCallbackHandler):
     """累计 Agent 多轮 LLM 调用的 token 消耗。"""
 
-    usage: TokenUsage = field(default_factory=TokenUsage)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.usage = TokenUsage()
 
     def on_llm_end(self, response: LLMResult, **kwargs) -> None:
         if not response.llm_output:

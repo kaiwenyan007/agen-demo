@@ -2,17 +2,20 @@
 LangChain Agent 模块 —— 支持用户级 API 配置与 Token 统计。
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from agent.rag import search_knowledge
-from agent.token_callback import TokenUsage, TokenUsageCallbackHandler
+from agent.rag_context import RagRequestContext, reset_rag_context, set_rag_context
+from agent.token_callback import TokenUsageCallbackHandler
 from agent.tools.calculator_tool import calculate
 from db.api_config import UserApiConfig
 
@@ -65,7 +68,7 @@ TOOLS = [get_current_time, calculate_tool, read_file, list_files, query_knowledg
 def build_agent_executor(config: UserApiConfig, verbose: bool = False) -> AgentExecutor:
     llm = ChatOpenAI(
         model=config.model,
-        api_key=config.api_key,
+        api_key=SecretStr(config.api_key) if config.api_key else None,
         base_url=config.base_url,
         temperature=0,
     )
@@ -88,16 +91,25 @@ def build_agent_executor(config: UserApiConfig, verbose: bool = False) -> AgentE
 
 
 def run_agent(
-    user_input: str,
-    config: UserApiConfig,
-    chat_history: list | None = None,
-    verbose: bool = False,
-) -> tuple[str, TokenUsage]:
+        user_input: str,
+        config: UserApiConfig,
+        chat_history: list | None = None,
+        verbose: bool = False,
+        user_id: int | None = None,
+        conversation_id: int | None = None,
+) -> tuple[str, Any] | None:
     """运行 Agent，返回 (回复文本, token 用量)。"""
     handler = TokenUsageCallbackHandler()
     executor = build_agent_executor(config, verbose=verbose)
-    result = executor.invoke(
-        {"input": user_input, "chat_history": chat_history or []},
-        config={"callbacks": [handler]},
-    )
-    return result["output"], handler.usage
+    invoke_config: RunnableConfig = {"callbacks": [handler]}
+    ctx_token: RagRequestContext | None = set_rag_context(user_id, conversation_id)
+    try:
+        result: dict[str, Any] = executor.invoke(
+            {"input": user_input, "chat_history": chat_history or []},
+            config=invoke_config,
+        )
+    finally:
+        reset_rag_context(ctx_token)
+
+    output = result.get("output", "")
+    return str(output), handler.usage

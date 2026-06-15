@@ -8,10 +8,11 @@
 
 ```powershell
 cd agent-demo
-.\.venv\Scripts\Activate.ps1
-pip install streamlit
-streamlit run web/app.py
+pip install -r requirements.txt
+py -m streamlit run web/app.py
 ```
+
+> Windows 若提示找不到 `streamlit` 命令，请用 `py -m streamlit run ...`（不依赖 Scripts 目录是否在 PATH 里）。
 
 注册 → 登录 → 配置 API → 开始聊天。
 

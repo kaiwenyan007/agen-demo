@@ -11,12 +11,12 @@ def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
-def register_user(username: str, password: str) -> tuple[bool, str]:
+def register_user(username: str, password: str) -> tuple[bool, str, int | None]:
     username = username.strip()
     if len(username) < 2:
-        return False, "用户名至少 2 个字符"
+        return False, "用户名至少 2 个字符", None
     if len(password) < 6:
-        return False, "密码至少 6 个字符"
+        return False, "密码至少 6 个字符", None
 
     try:
         with get_db() as conn:
@@ -30,11 +30,11 @@ def register_user(username: str, password: str) -> tuple[bool, str]:
                 (user_id,),
             )
             conn.commit()
-        return True, "注册成功"
+        return True, "注册成功", user_id
     except Exception as e:
         if "UNIQUE" in str(e):
-            return False, "用户名已存在"
-        return False, f"注册失败: {e}"
+            return False, "用户名已存在", None
+        return False, f"注册失败: {e}", None
 
 
 def login_user(username: str, password: str) -> tuple[int | None, str]:
